@@ -1,9 +1,13 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Use tuple-section" #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+{-# HLINT ignore "Use concatMap" #-}
 module Typee where
 import Data.List(nub, intersect, union)
 
 type Index  = Int
 type Id     = String
-data TI a   = TI (Index -> (a, Index))
+newtype TI a   = TI (Index -> (a, Index))
 type Subst  = [(Id, SimpleType)]
 data Assump = Id :>: SimpleType deriving (Eq, Show)
 
@@ -12,6 +16,7 @@ data SimpleType  =  TVar Id
                   | TGen Int
                   | TCon String
                   deriving Eq
+
 
 maxTGen n (TArr t1 t2) = maxTGen (maxTGen n t1) t2
 maxTGen n (TGen i)     = max n i
@@ -22,20 +27,24 @@ inst ts (TArr l r) = TArr (inst ts l) (inst ts r)
 inst ts (TGen i)  = ts !! i
 inst ts t         = t
 
+fst' (a, b, c) = a
+
+snd' (a, b, c) = b
+
 unquantify t = do let m = maxTGen (-1) t
                   ts <- freshVars m
                   return (inst ts t)  
                
-g = [ "sum"    :>: (TArr (TCon "Int") (TArr (TCon "Int") (TCon "Int"))),
-      "concat" :>: (TArr (TCon "String") (TArr (TCon "String") (TCon "String"))),
-      "div"    :>: (TArr (TCon "Double") (TArr (TCon "Double") (TCon "Double"))),
-      "Cons"   :>: (TArr (TGen 0) (TArr (TArr (TCon "Lista") (TGen 0)) (TArr (TCon "Lista") (TGen 0)))),
-      "Nil"    :>: (TArr (TCon "Lista") (TGen 0)),
-      "Pair"   :>: (TArr (TGen 0) (TArr (TGen 1) (TArr (TArr (TCon "Proj") (TGen 0)) (TGen 1))))]
+g = [ "sum"    :>: TArr (TCon "Int") (TArr (TCon "Int") (TCon "Int")),
+      "concat" :>: TArr (TCon "String") (TArr (TCon "String") (TCon "String")),
+      "div"    :>: TArr (TCon "Double") (TArr (TCon "Double") (TCon "Double")),
+      "Cons"   :>: TArr (TGen 0) (TArr (TArr (TCon "Lista") (TGen 0)) (TArr (TCon "Lista") (TGen 0))),
+      "Nil"    :>: TArr (TCon "Lista") (TGen 0),
+      "Pair"   :>: TArr (TGen 0) (TArr (TGen 1) (TArr (TArr (TCon "Proj") (TGen 0)) (TGen 1)))]
 
 instance Show SimpleType where
-   show (TArr (TArr (TCon "Proj") a ) b) = "("++(show a)++","++(show b)++")"
-   show (TArr (TCon "Lista") a) = "["++(show a)++"]"
+   show (TArr (TArr (TCon "Proj") a ) b) = "("++ show a ++","++ show b ++")"
+   show (TArr (TCon "Lista") a) = "["++ show a ++"]"
    show (TVar i) = i
    show (TArr (TVar i) t) = i++" -> "++show t   
    show (TArr (TCon i) t) = i++" -> "++show t  
@@ -72,7 +81,7 @@ dom = map (\(i:>:_)->i)
 as /+/ as' = as' ++ filter compl as
    where
      is = dom as'
-     compl (i:>:_) = notElem i is
+     compl (i:>:_) = i `notElem` is
 ---------------------------- 
 class Subs t where
   apply :: Subst -> t -> t
@@ -87,7 +96,7 @@ instance Subs SimpleType where
                     case lookup u s of
                        Just t  -> t
                        Nothing -> TCon u
-  apply s (TArr l r) =  (TArr (apply s l) (apply s r))
+  apply s (TArr l r) =  TArr (apply s l) (apply s r)
   apply s (TGen i) = TGen i
 
   tv (TVar u)  = [u]
@@ -112,7 +121,7 @@ varBind u t | t == TVar u   = Just []
             | otherwise     = Just [(u, t)]
       
 mgu (TArr l r,  TArr l' r') = do s1 <- mgu (l,l')
-                                 s2 <- mgu ((apply s1 r) ,  (apply s1 r'))
+                                 s2 <- mgu (apply s1 r ,  apply s1 r')
                                  return (s2 @@ s1)
 mgu (t,        TVar u   )   =  varBind u t
 mgu (TVar u,   t        )   =  varBind u t
@@ -121,6 +130,6 @@ mgu (t,        TCon u   )   =  varBind u t
 mgu (TCon u,   t        )   =  varBind u t
 
 unify t t' =  case mgu (t,t') of
-    Nothing -> error ("\ntrying to unify:\n" ++ (show t) ++ "\nand\n" ++
-                      (show t')++"\n")
+    Nothing -> error ("\ntrying to unify:\n" ++ show t ++ "\nand\n" ++
+                      show t' ++"\n")
     Just s  -> s

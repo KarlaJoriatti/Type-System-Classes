@@ -1,5 +1,13 @@
+{-# OPTIONS_GHC -Wno-unrecognised-pragmas #-}
+{-# HLINT ignore "Move brackets to avoid $" #-}
+{-# HLINT ignore "Use concatMap" #-}
+{-# HLINT ignore "Redundant bracket" #-}
+{-# HLINT ignore "Use <$>" #-}
+{-# HLINT ignore "Redundant $" #-}
+{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 import Text.Parsec
 import Typee
+import Distribution.PackageDescription (TestSuite(TestSuite))
 
 data Literal = LitInt   Integer
              | LitChar  Char
@@ -8,6 +16,11 @@ data Literal = LitInt   Integer
              | LitBool  Bool
              deriving (Eq, Show)
 
+data Pat = PVar Id
+         | PLit Literal
+         | PCon String [Pat]
+         deriving (Eq, Show)
+
 data Expr =   Var Id
             | App Expr Expr
             | Lam Id Expr
@@ -15,6 +28,7 @@ data Expr =   Var Id
             | Lit Literal
             | Constr String
             | If Expr Expr Expr
+            | Case Expr [(Pat, Expr)]
             deriving (Eq, Show)
 
 tiContext :: [Assump] -> Id -> TI SimpleType
@@ -23,7 +37,24 @@ tiContext g i = if l /= [] then unquantify t else error ("Undefined: " ++ i ++ "
       l = dropWhile (\(i' :>: _) -> i /= i' ) g
       (_ :>: t) = head l
       unqt = unquantify t       
-   
+
+setArr [x] = x   
+setArr (x:xs) = TArr (x) (setArr xs)
+
+unifyEP g t [] = return (t, g, [])
+unifyEP g t (x:xs) = do 
+                       (t', g', s1) <- tiExpr' g x
+                       (t'', g'', s2) <- unifyEP g' t xs 
+                       let s = unify t t'
+                       return (t, g'', s1 @@ s2)
+
+patterns :: [Assump] -> [Pat] -> TI[(SimpleType, [Assump], [(Id, SimpleType)])]
+patterns g [] = return []
+patterns g (x:xs) = do
+                      t <- tiExpr' g x
+                      let t' = fst' t
+                      ts <- fmap (t:) (patterns g xs)
+                      return (ts)
 
 fechamento :: [Assump] -> SimpleType -> SimpleType
 fechamento g t = apply s t
@@ -36,15 +67,31 @@ takeLit (LitStr   a) = TCon "String"
 takeLit (LitFloat a) = TCon "Double"
 takeLit (LitBool  a) = TCon "Bool"
 
-
+tiExpr' :: [Assump] -> Pat -> TI (SimpleType, [Assump], [(Id, SimpleType)])
+tiExpr' g (PVar i) = do 
+                       b <- freshVar
+                       return (b, g/+/[i:>:b], [])
+tiExpr' g (PLit i) = return (takeLit i, g, [])
+tiExpr' g (PCon i p) = do
+                         t  <- tiContext g i
+                         t' <- unquantify t
+                         ts <- patterns g p 
+                         let ts'  = map fst' ts
+                             ts'' = setArr ts'
+                             g'   = concat (map snd' ts)
+                             s    = unify t' ts''
+                         return (apply s t', g', s)
+                         
+assumps [] [] s = []
+assumps (y:ys) (x:xs) s = (y:>:apply s x) : (assumps ys xs s)
 
 tiExpr g (Lit i) = return (takeLit i, [])
 tiExpr g (Var i) = do
                      t <- tiContext g i
                      return (t, [])
 tiExpr g (Constr i) = do
-	                t <- tiContext g i
-	                return (t, [])
+                        t <- tiContext g i
+                        return (t, [])
 tiExpr g (App e e') = do (t, s1) <- tiExpr g e
                          (t', s2) <- tiExpr (apply s1 g) e'
                          b <- freshVar
@@ -54,7 +101,7 @@ tiExpr g (Lam i e) = do b <- freshVar
                         (t, s)  <- tiExpr (g/+/[i:>:b]) e
                         return (apply s (b --> t), s)
 tiExpr g (Let i e e') = do (t, s1) <- tiExpr g e
-                           (t', s2) <- tiExpr (apply s1 (g/+/[i:>:(fechamento (apply s1 g) t)])) e'
+                           (t', s2) <- tiExpr (apply s1 (g/+/[i:>:fechamento (apply s1 g) t])) e'
                            return (t', s1 @@ s2)
 tiExpr g (If c e e')  = do (t1, s1) <- tiExpr g c
                            (t2, s2) <- tiExpr (apply s1 g) e
@@ -62,9 +109,13 @@ tiExpr g (If c e e')  = do (t1, s1) <- tiExpr g c
                            let s4 = unify t1 (TCon "Bool")
                                s5 = unify t2 t3
                            return (apply s5 t3, s1 @@ s2 @@ s3 @@ s4 @@ s5)
+tiExpr g (Case e ps) = do
+                                   (t, s) <- tiExpr g e
+                                   (t', g', s') <- unifyEP g t (map fst ps)
+                                   return (t, s @@ s')
 
 
---- Examples ---
+--- Exemplos ---
 ex1 = Lam "f" (Lam "x" (App (Var "f") (Var "x")))
 ex2 = Lam "x" (App (Var "x") (Var "x"))
 ex3 = Lam "g" (Lam "f" (Lam "x" (App (Var "g") (App (Var "f") (Var "x")))))
@@ -96,6 +147,13 @@ ex23 = Lam "z" (Lam "y" (Lam "x" (If (Var "x") (Var "z") (Var "y"))))
 -- erro if --
 ex24 = If (Lit (LitInt 2)) (Let "a" (Constr "Pair") (Var "a")) (Let "b" (Constr "Pair") (Var "b"))
 ex25 = If (Lit (LitBool True)) (Let "a" (Constr "Cons") (Var "a")) (Let "b" (Constr "Pair") (Var "b"))
+-- case --
+ex26 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitInt 2), Var "False"), (PLit (LitInt 3), Var "True")])
+-- erro case --
+ex27 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitChar 'c'), Var "False"), (PLit (LitInt 3), Var "True")])
+ex28 = Case (Var "x") [(PLit (LitInt 2), Var "False")]
+
+
 
 infer e = runTI (tiExpr g e)
 
@@ -126,4 +184,4 @@ parseLambda s = case parseExpr s of
 
 main = do putStr "Lambda:"
           e <- getLine
-          parseLambda e		
+          parseLambda e
