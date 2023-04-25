@@ -44,9 +44,10 @@ setArr (x:xs) = TArr (x) (setArr xs)
 unifyEP g t [] = return (t, g, [])
 unifyEP g t (x:xs) = do 
                        (t', g', s1) <- tiExpr' g x
-                       (t'', g'', s2) <- unifyEP g' t xs 
+                       (t'', g'', s2) <- unifyEP g' t xs
+                       unifyEP g' t' xs
                        let s = unify t t'
-                       return (t, g'', s1 @@ s2)
+                       return (t', g'', s1 @@ s2)
 
 patterns :: [Assump] -> [Pat] -> TI[(SimpleType, [Assump], [(Id, SimpleType)])]
 patterns g [] = return []
@@ -110,9 +111,9 @@ tiExpr g (If c e e')  = do (t1, s1) <- tiExpr g c
                                s5 = unify t2 t3
                            return (apply s5 t3, s1 @@ s2 @@ s3 @@ s4 @@ s5)
 tiExpr g (Case e ps) = do
-                                   (t, s) <- tiExpr g e
-                                   (t', g', s') <- unifyEP g t (map fst ps)
-                                   return (t, s @@ s')
+                         (t, s) <- tiExpr g e
+                         (t', g', s') <- unifyEP g t (map fst ps)
+                         return (t', s @@ s')
 
 
 --- Exemplos ---
