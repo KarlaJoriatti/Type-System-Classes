@@ -7,7 +7,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 import Text.Parsec
 import Typee
-import Distribution.PackageDescription (TestSuite(TestSuite))
+--import Distribution.PackageDescription (TestSuite(TestSuite))
 
 data Literal = LitInt   Integer
              | LitChar  Char
@@ -38,16 +38,30 @@ tiContext g i = if l /= [] then unquantify t else error ("Undefined: " ++ i ++ "
       (_ :>: t) = head l
       unqt = unquantify t       
 
-setArr [x] = x   
-setArr (x:xs) = TArr (x) (setArr xs)
+setArr [] t = t
+setArr [x] t = x   
+setArr (x:xs) t = TArr (x) (setArr xs t)
 
-unifyEP g t [] = return (t, g, [])
+takeLast = (take 1) . reverse
+
+unifyEP g t [] = return (t, [], [])
 unifyEP g t (x:xs) = do 
                        (t', g', s1) <- tiExpr' g x
-                       (t'', g'', s2) <- unifyEP g' t xs
-                       unifyEP g' t' xs
-                       let s = unify t t'
-                       return (t', g'', s1 @@ s2)
+                       let s = unify t' t
+                       (t'', g'', s2) <- unifyEP g (apply s t) xs
+                       return (apply s2 t, g': g'', s @@ s1 @@ s2)
+
+exprs' g t [] = return (t, [])
+exprs' (g':g'') t (x:xs) = do
+                      (t', s1) <- tiExpr g' x
+                      let s = unify t' t
+                      (t'', s2) <- exprs' g'' (apply s t) xs
+                      return (t', s1 @@ s)
+
+caseExprs (g':g'') (x:xs) = do
+                   (t, s) <- tiExpr g' x
+                   (t', s1) <- exprs' g'' t xs
+                   return (t, s @@ s1) 
 
 patterns :: [Assump] -> [Pat] -> TI[(SimpleType, [Assump], [(Id, SimpleType)])]
 patterns g [] = return []
@@ -68,6 +82,9 @@ takeLit (LitStr   a) = TCon "String"
 takeLit (LitFloat a) = TCon "Double"
 takeLit (LitBool  a) = TCon "Bool"
 
+assumps [] [] s = []
+assumps (y:ys) (x:xs) s = (y:>:apply s x) : (assumps ys xs s)
+
 tiExpr' :: [Assump] -> Pat -> TI (SimpleType, [Assump], [(Id, SimpleType)])
 tiExpr' g (PVar i) = do 
                        b <- freshVar
@@ -78,13 +95,12 @@ tiExpr' g (PCon i p) = do
                          t' <- unquantify t
                          ts <- patterns g p 
                          let ts'  = map fst' ts
-                             ts'' = setArr ts'
+                             ts'' = setArr ts' t
                              g'   = concat (map snd' ts)
                              s    = unify t' ts''
-                         return (apply s t', g', s)
+                             t''  = getLast (length p) t'
+                         return (apply s t'', g', s)
                          
-assumps [] [] s = []
-assumps (y:ys) (x:xs) s = (y:>:apply s x) : (assumps ys xs s)
 
 tiExpr g (Lit i) = return (takeLit i, [])
 tiExpr g (Var i) = do
@@ -112,8 +128,9 @@ tiExpr g (If c e e')  = do (t1, s1) <- tiExpr g c
                            return (apply s5 t3, s1 @@ s2 @@ s3 @@ s4 @@ s5)
 tiExpr g (Case e ps) = do
                          (t, s) <- tiExpr g e
-                         (t', g', s') <- unifyEP g t (map fst ps)
-                         return (t', s @@ s')
+                         (t1, g', s1) <- unifyEP g t (map fst ps)
+                         (t2, s2) <- caseExprs g' (map snd ps)
+                         return (t2, s @@ s1 @@ s2)
 
 
 --- Exemplos ---
@@ -149,10 +166,12 @@ ex23 = Lam "z" (Lam "y" (Lam "x" (If (Var "x") (Var "z") (Var "y"))))
 ex24 = If (Lit (LitInt 2)) (Let "a" (Constr "Pair") (Var "a")) (Let "b" (Constr "Pair") (Var "b"))
 ex25 = If (Lit (LitBool True)) (Let "a" (Constr "Cons") (Var "a")) (Let "b" (Constr "Pair") (Var "b"))
 -- case --
-ex26 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitInt 2), Var "False"), (PLit (LitInt 3), Var "True")])
+ex26 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitInt 2), Lit( LitBool True)), (PLit (LitInt 3), Lit( LitBool False))])
+ex27 = Lam "x" (Case (Var "x") [(PLit (LitInt 2), Lit( LitBool True)), (PLit (LitInt 3), Lit( LitBool False))]) 
+ex28 = Lam "y" (Case (Var "y") [(PCon "Cons" [PVar "x", PVar "xs"], Lit( LitBool True)), (PCon "Nil" [], Lit( LitBool False))])
 -- erro case --
-ex27 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitChar 'c'), Var "False"), (PLit (LitInt 3), Var "True")])
-ex28 = Case (Var "x") [(PLit (LitInt 2), Var "False")]
+ex29 = Let "x" (Lit (LitInt 3)) (Case (Var "x") [(PLit (LitChar 'c'), Lit( LitBool False)), (PLit (LitInt 3), Lit( LitBool True))])
+ex30 = Case (Var "x") [(PLit (LitInt 2), Lit( LitBool False))]
 
 
 

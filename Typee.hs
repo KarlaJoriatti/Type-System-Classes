@@ -2,8 +2,10 @@
 {-# HLINT ignore "Use tuple-section" #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# HLINT ignore "Use concatMap" #-}
+{-# OPTIONS_GHC -Wno-noncanonical-monad-instances #-}
 module Typee where
 import Data.List(nub, intersect, union)
+import System.Random (Random(random))
 
 type Index  = Int
 type Id     = String
@@ -26,6 +28,9 @@ maxTGen n _            = n
 inst ts (TArr l r) = TArr (inst ts l) (inst ts r)
 inst ts (TGen i)  = ts !! i
 inst ts t         = t
+
+getLast 0 t = t
+getLast count (TArr l r) = getLast (count-1) r
 
 fst' (a, b, c) = a
 
