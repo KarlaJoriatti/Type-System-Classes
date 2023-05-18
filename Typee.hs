@@ -5,7 +5,6 @@
 {-# OPTIONS_GHC -Wno-noncanonical-monad-instances #-}
 module Typee where
 import Data.List(nub, intersect, union)
-import System.Random (Random(random))
 
 type Index  = Int
 type Id     = String

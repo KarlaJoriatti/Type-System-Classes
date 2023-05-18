@@ -7,6 +7,8 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 import Text.Parsec
 import Typee
+import qualified Text.Parsec.Token as T
+import Text.Parsec.Language (emptyDef)
 --import Distribution.PackageDescription (TestSuite(TestSuite))
 
 data Literal = LitInt   Integer
@@ -125,7 +127,7 @@ tiExpr g (If c e e')  = do (t1, s1) <- tiExpr g c
                            (t3, s3) <- tiExpr (apply (s1 @@ s2) g) e'
                            let s4 = unify t1 (TCon "Bool")
                                s5 = unify t2 t3
-                           return (apply s5 t3, s1 @@ s2 @@ s3 @@ s4 @@ s5)
+                           return (apply s5 t3, s4 @@ s1 @@ s2 @@ s3 @@ s5)
 tiExpr g (Case e ps) = do
                          (t, s) <- tiExpr g e
                          (t1, g', s1) <- unifyEP g t (map fst ps)
@@ -180,10 +182,26 @@ infer e = runTI (tiExpr g e)
 -------- Parser ---------------
 parseExpr = runParser expr [] "lambda-calculus"
 
+lexico = T.makeTokenParser lingDef
+
+lingDef = emptyDef
+          { T.reservedNames = ["Let", "Case", "in"]
+          , T.reservedOpNames = ["="]
+          }
+
 expr :: Parsec String u Expr
 expr = chainl1 (between spaces spaces parseNonApp) $ return $ App
 
+boolParser = do {string "True"; return (Lit (LitBool True))}
+             <|> do {string "False"; return (Lit (LitBool False))}
+
 var = do {i <- varId; return (Var i)}
+
+litExpr = try (do {n <- T.float lexico; return (Lit (LitFloat n))})
+          <|> do {n <- T.natural lexico; return (Lit (LitInt n))}
+          <|> do {n <- T.charLiteral lexico; return (Lit (LitChar n))}
+          <|> do {boolParser}
+          <|> do {n <- T.stringLiteral lexico; return (Lit (LitStr n))}
 
 lamAbs term = do char '\\'
                  i <- varId
@@ -191,8 +209,28 @@ lamAbs term = do char '\\'
                  e <- term
                  return (Lam i e)
 
+letExpr = do string "Let "
+             i <- varId
+             string " = "
+             e <- parseNonApp
+             string " in "
+             e' <- parseNonApp
+             return (Let i e e')
+
+ifExpr = do string "if "
+            c <- parseNonApp
+            string " then "
+            e <- parseNonApp
+            string " else "
+            e' <- parseNonApp
+            return(If c e e')
+
+
 parseNonApp =  do {char '('; e <- expr; char ')'; return e} -- (E)
               <|> lamAbs expr                               -- \x.E
+              <|> ifExpr                                    -- if (C) then (E) else (E')
+              <|> letExpr                                   -- Let x = (E) in E'
+              <|> litExpr                                   -- literal
               <|> var                                       -- x
 
 varId = many1 letter 
