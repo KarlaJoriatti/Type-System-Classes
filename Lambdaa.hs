@@ -5,6 +5,9 @@
 {-# HLINT ignore "Use <$>" #-}
 {-# HLINT ignore "Redundant $" #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
+
+module Lambdaa where
+
 import Text.Parsec
 import Typee
 import qualified Text.Parsec.Token as T
@@ -179,67 +182,3 @@ ex30 = Case (Var "x") [(PLit (LitInt 2), Lit( LitBool False))]
 
 infer e = runTI (tiExpr g e)
 
--------- Parser ---------------
-parseExpr = runParser expr [] "lambda-calculus"
-
-lexico = T.makeTokenParser lingDef
-
-lingDef = emptyDef
-          { T.reservedNames = ["Let", "Case", "in"]
-          , T.reservedOpNames = ["="]
-          }
-
-expr :: Parsec String u Expr
-expr = chainl1 (between spaces spaces parseNonApp) $ return $ App
-
-boolParser = do {string "True"; return (Lit (LitBool True))}
-             <|> do {string "False"; return (Lit (LitBool False))}
-
-var = do {i <- varId; return (Var i)}
-
-litExpr = try (do {n <- T.float lexico; return (Lit (LitFloat n))})
-          <|> do {n <- T.natural lexico; return (Lit (LitInt n))}
-          <|> do {n <- T.charLiteral lexico; return (Lit (LitChar n))}
-          <|> do {boolParser}
-          <|> do {n <- T.stringLiteral lexico; return (Lit (LitStr n))}
-
-lamAbs term = do char '\\'
-                 i <- varId
-                 char '.'
-                 e <- term
-                 return (Lam i e)
-
-letExpr = do string "Let "
-             i <- varId
-             string " = "
-             e <- parseNonApp
-             string " in "
-             e' <- parseNonApp
-             return (Let i e e')
-
-ifExpr = do string "if "
-            c <- parseNonApp
-            string " then "
-            e <- parseNonApp
-            string " else "
-            e' <- parseNonApp
-            return(If c e e')
-
-
-parseNonApp =  do {char '('; e <- expr; char ')'; return e} -- (E)
-              <|> lamAbs expr                               -- \x.E
-              <|> ifExpr                                    -- if (C) then (E) else (E')
-              <|> letExpr                                   -- Let x = (E) in E'
-              <|> litExpr                                   -- literal
-              <|> var                                       -- x
-
-varId = many1 letter 
-
-----------------------------------------
-parseLambda s = case parseExpr s of
-                     Left er -> print er
-                     Right e -> (print e >> print (infer e))
-
-main = do putStr "Lambda:"
-          e <- getLine
-          parseLambda e

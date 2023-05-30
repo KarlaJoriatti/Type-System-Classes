@@ -11,7 +11,6 @@ type Id     = String
 newtype TI a   = TI (Index -> (a, Index))
 type Subst  = [(Id, SimpleType)]
 data Assump = Id :>: SimpleType deriving (Eq, Show)
-
 data SimpleType  =  TVar Id
                   | TArr  SimpleType SimpleType
                   | TGen Int
